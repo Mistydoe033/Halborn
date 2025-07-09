@@ -128,14 +128,14 @@ contract HalbornTest is Test {
     }
 
     function test_WhitelistAbuseExploit() public {
-        // attacker is ALICE
-        vm.prank(attacker);
+        // ✅ Use ALICE, the whitelisted address in Merkle root
+        vm.prank(ALICE);
         nft.mintAirdrops(15, ALICE_PROOF_1);
 
-        vm.prank(attacker);
+        vm.prank(ALICE);
         nft.mintAirdrops(19, ALICE_PROOF_2);
 
-        assertEq(nft.balanceOf(attacker), 2);
+        assertEq(nft.balanceOf(ALICE), 2);
     }
 
     function test_TokenMintingAuthorityExploit() public {
