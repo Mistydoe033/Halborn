@@ -42,7 +42,7 @@ contract HalbornToken_Test is Test {
         token.setLoans(address(1));
     }
 
-    // Critical Bug 12: anyone can upgrade
+    // Critical Exploit 1: anyone can upgrade
     /**
      * @dev EXPLOIT: UUPS Upgrade Takeover Attack
      *
@@ -74,7 +74,7 @@ contract HalbornToken_Test is Test {
         token.initialize();
     }
 
-    // Critical Bug 13: setLoans can be set to arbitrary address
+    // Critical Exploit 2: setLoans can be set to arbitrary address
     /**
      * @dev EXPLOIT: Loans Address Manipulation Attack
      *
@@ -110,7 +110,7 @@ contract HalbornToken_Test is Test {
         token.setLoans(address(0x10));
     }
 
-    // Critical Bug 14: unlimited minting of token
+    // Critical Exploit 3: unlimited minting of token
     /**
      * @dev EXPLOIT: Unlimited Token Minting Attack
      *
@@ -172,7 +172,7 @@ contract HalbornToken_Test is Test {
         token.mintToken(address(this), 1e18);
     }
 
-    // Critical Bug 15: loss of user funds via burn
+    // Critical Exploit 4: loss of user funds via burn
     /**
      * @dev EXPLOIT: Unlimited Token Burning Attack
      *

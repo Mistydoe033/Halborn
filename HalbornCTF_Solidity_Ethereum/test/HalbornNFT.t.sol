@@ -45,7 +45,7 @@ contract HalbornNFT_Test is Test, Merkle {
         assertEq(nft.price(), 1 ether);
     }
 
-    // Critical Bug 6: anyone can set merkle root
+    // Critical Exploit 1: anyone can set merkle root
     /**
      * @dev EXPLOIT: Merkle Root Manipulation Attack
      *
@@ -84,7 +84,7 @@ contract HalbornNFT_Test is Test, Merkle {
         assertEq(nft.merkleRoot(), newRoot);
     }
 
-    // Critical Bug 7: Mint after setting merkle root
+    // Critical Exploit 2: Mint after setting merkle root
     /**
      * @dev EXPLOIT: Unlimited Airdrop Minting via Merkle Manipulation
      *
@@ -139,7 +139,7 @@ contract HalbornNFT_Test is Test, Merkle {
         // Could continue minting more with additional crafted proofs
     }
 
-    // Critical Bug 8: anyone can upgrade to UUPSattack
+    // Critical Exploit 3: anyone can upgrade to UUPSattack
     /**
      * @dev EXPLOIT: UUPS Upgrade Takeover Attack
      *
@@ -173,7 +173,7 @@ contract HalbornNFT_Test is Test, Merkle {
         assertEq(nft.price(), 666);
     }
 
-    // Critical Bug 9: anyone can set price
+    // Critical Exploit 9: anyone can set price
     function test_setPrice() public {
         address unauthorizedUser = address(0xdead);
         vm.startPrank(unauthorizedUser);
@@ -209,7 +209,7 @@ contract HalbornNFT_Test is Test, Merkle {
         */
     }
 
-    // Critical Bug 11: anyone can steal to ETH in contract
+    // Critical Exploit 4: anyone can steal to ETH in contract
     /**
      * @dev EXPLOIT: ETH Drainage Attack via Malicious Upgrade
      *
