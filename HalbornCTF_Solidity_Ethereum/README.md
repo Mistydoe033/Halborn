@@ -138,3 +138,6 @@ This document summarizes the vulnerabilities exploited through unit testing of t
 ---
 
 **Status:** All issues demonstrated successfully via unit tests using Foundry.
+
+**Usage 1:** `forge test --match-path 'test/Halborn*.*.sol' --no-match-path 'test/Halborn.t.sol'`
+**Usage 2:** `forge test -vv --match-path 'test/Halborn*.*.sol' --no-match-path 'test/Halborn.t.sol'`

