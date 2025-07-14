@@ -69,20 +69,43 @@ This document summarizes the vulnerabilities exploited through unit testing of t
 ### 🛠️ Exploit 4: Reentrancy in NFT Collateral Withdrawal
 
 - **Test:** `test_Reentrancy()`
-- **Issue:** `withdrawCollateral()` lacks reentrancy protection.
-- **Exploit:** Re-enter during `onERC721Received` callback to withdraw multiple NFTs and call `getLoan(...)` before state updates.
-- **Impact:** Double NFT withdrawal and max loan drain.
+- **Issue:** `withdrawCollateral()` has **no reentrancy guard** (e.g., `nonReentrant`).
+- **Exploit:** Uses the `onERC721Received()` callback (triggered during `safeTransferFrom`) to **re-enter** `withdrawCollateral()` before the contract finishes updating internal state.
+- **Impact:** Withdraws multiple NFTs and drains the full loan balance based on outdated/corrupted collateral accounting.
 - **Severity:** 🔴 Critical
+
+### 🧠 Real-World Analogy (Plain English)
+
+Imagine you're at a bank that gives you loans based on how many gold bars (NFTs) you’ve deposited in a vault.
+
+- You deposit **2 gold bars**.
+- You ask to withdraw **1 gold bar**.
+- The bank says “Sure,” and starts handing it over.
+- **But while the handover is happening**, you sneak into the system and say “Hey, I still have 2 bars in the vault, let me get the second one too.”
+- Because the system hasn’t **finished updating** your record (you still show as having 2 bars), it says “Okay.”
+- Now you’ve withdrawn **both** bars.
+- You then immediately say “Look, I have 2 bars — give me the **maximum loan**!”
+- The bank, using the outdated record, gives you a full loan based on the now-nonexistent collateral.
+- You walk away with both bars **and** the loan.
+
+---
 
 ### 🛠️ Exploit 5: Insecure Loan Collateralization
 
 - **Test:** Implicit in `test_Reentrancy()`, confirmed in reentrant logic
-- **Issue:** Loan amount is based on collateral count without lock mechanism or atomicity.
-- **Exploit:** Reentrancy alters collateral count mid-calculation, inflating borrowable tokens.
-- **Impact:** Collateral fraud, overdrawing loans.
+- **Issue:** The `getLoan()` function calculates borrowable amount based on `totalCollateral[msg.sender]` — but that value can be outdated due to reentrancy.
+- **Exploit:** The attacker re-enters during `withdrawCollateral()`, and calls `getLoan()` while the contract still thinks they have more collateral than they actually do.
+- **Impact:** The system overestimates the user's collateral, and issues a loan that’s far too large.
 - **Severity:** 🟠 Medium
 
----
+### 🧠 Real-World Analogy (Plain English)
+
+Continuing from the previous example:
+
+- After withdrawing both gold bars using the reentrancy trick,
+- You quickly shout: “I still have 2 gold bars in the vault — give me the **maximum loan** now!”
+- The bank, still believing its records are accurate (even though you now hold the gold bars in your hand), gives you the full loan.
+- You walk away with both the gold bars **and** the cash — fully draining the bank.
 
 ## 📄 HalbornNFT.sol
 
