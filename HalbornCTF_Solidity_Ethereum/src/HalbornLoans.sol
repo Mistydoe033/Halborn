@@ -31,7 +31,10 @@ contract HalbornLoans is Initializable, UUPSUpgradeable, MulticallUpgradeable {
     }
 
     function depositNFTCollateral(uint256 id) external {
-        require(nft.ownerOf(id) == msg.sender, "Caller is not the owner of the NFT");
+        require(
+            nft.ownerOf(id) == msg.sender,
+            "Caller is not the owner of the NFT"
+        );
 
         nft.safeTransferFrom(msg.sender, address(this), id);
 
@@ -40,7 +43,11 @@ contract HalbornLoans is Initializable, UUPSUpgradeable, MulticallUpgradeable {
     }
 
     function withdrawCollateral(uint256 id) external {
-        require(totalCollateral[msg.sender] - usedCollateral[msg.sender] >= collateralPrice, "Collateral unavailable");
+        require(
+            totalCollateral[msg.sender] - usedCollateral[msg.sender] >=
+                collateralPrice,
+            "Collateral unavailable"
+        );
         require(idsCollateral[id] == msg.sender, "ID not deposited by caller");
 
         nft.safeTransferFrom(address(this), msg.sender, id);
@@ -49,7 +56,10 @@ contract HalbornLoans is Initializable, UUPSUpgradeable, MulticallUpgradeable {
     }
 
     function getLoan(uint256 amount) external {
-        require(totalCollateral[msg.sender] - usedCollateral[msg.sender] < amount, "Not enough collateral");
+        require(
+            totalCollateral[msg.sender] - usedCollateral[msg.sender] < amount,
+            "Not enough collateral"
+        );
         usedCollateral[msg.sender] += amount;
         token.mintToken(msg.sender, amount);
     }
@@ -62,13 +72,4 @@ contract HalbornLoans is Initializable, UUPSUpgradeable, MulticallUpgradeable {
     }
 
     function _authorizeUpgrade(address) internal override {}
-
-    // BUG on ERC721Received was not implemented...
-    function onERC721Received(address , address , uint256 , bytes calldata )
-        external
-        pure
-        returns (bytes4)
-    {
-        return this.onERC721Received.selector;
-    }
 }

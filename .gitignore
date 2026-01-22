@@ -1,0 +1,47 @@
+# Build artifacts
+*.bin
+*.exe
+*.so
+*.dylib
+*.dll
+target/
+out/
+bin/
+obj/
+dist/
+build/
+
+# Dependencies
+node_modules/
+vendor/
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Generated files (Cosmos) - but these are tracked, so don't ignore
+# *.pb.go
+# *.pulsar.go
+
+# Rust build artifacts
+**/target/
+
+# Go build artifacts
+*.test
+*.out
+
+# Temporary files
+*.tmp
+*.temp
+
