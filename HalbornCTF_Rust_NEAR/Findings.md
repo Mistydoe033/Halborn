@@ -70,14 +70,20 @@ Five vulnerabilities were identified across the three contracts. Multiple test c
 
 **All Test Cases:**
 
-Main Contract (halborn-near-ctf):
-- test_resume_bug_contract_stays_paused
-- test_resume_bug_cannot_use_contract
-- test_mint_tokens_bug_unregistered_user
-- test_mint_tokens_bug_token_loss
-- test_metadata_consumption_bug
-- test_metadata_consumption_bug_multiple_functions
-- test_metadata_consumption_bug_ft_metadata
+Main Contract (halborn-near-ctf) - 13 tests total:
+- test_new (functional test)
+- test_mint (functional test)
+- test_transfer (functional test)
+- test_pause (functional test)
+- test_blocklist (functional test)
+- test_blocklist2 (functional test)
+- test_resume_bug_contract_stays_paused (vulnerability test)
+- test_resume_bug_cannot_use_contract (vulnerability test)
+- test_mint_tokens_bug_unregistered_user (vulnerability test)
+- test_mint_tokens_bug_token_loss (vulnerability test)
+- test_metadata_consumption_bug (vulnerability test)
+- test_metadata_consumption_bug_multiple_functions (vulnerability test)
+- test_metadata_consumption_bug_ft_metadata (vulnerability test)
 
 Associated Contract (halborn-near-ctf-associated-contract):
 - test_make_event_offline_bug_no_effect

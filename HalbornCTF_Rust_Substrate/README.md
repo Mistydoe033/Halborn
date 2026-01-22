@@ -28,6 +28,26 @@ cd CTFs/Substrate/Pallets
 
 3. Write a detailed report for all the issues.
 
+## Running Tests
+
+To run all vulnerability tests for both pallets:
+
+```shell
+cargo test --package pallet-pause --package pallet-allocations --lib
+```
+
+To run tests for individual pallets:
+
+```shell
+# Test Pause Pallet only
+cargo test --package pallet-pause --lib
+
+# Test Allocations Pallet only
+cargo test --package pallet-allocations --lib
+```
+
+**Note:** This project requires Rust 1.68.0. A `rust-toolchain` file is included to automatically use the correct version.
+
 ## Bug Severity Levels
 
 - **Low:** Minor issues that have minimal impact.

@@ -21,7 +21,7 @@
 use super::*;
 use crate::{self as pallet_allocations};
 use frame_support::{assert_noop, assert_ok, ord_parameter_types, parameter_types};
-use frame_system::EnsureSignedBy;
+use frame_system::{EnsureSignedBy, RawOrigin};
 use sp_core::H256;
 use sp_runtime::{
     testing::Header,
@@ -178,19 +178,30 @@ fn allocate_the_right_amount_of_coins_to_everyone() {
 }
 
 
-// #[test]
-// fn can_not_allocate_more_coins_than_max() {
-//     new_test_ext().execute_with(|| {
-//         Allocations::initialize_members(&[Oracle::get()]);
 
-//         assert_noop!(
-//             Allocations::allocate_coins(
-//                 Origin::signed(Oracle::get()),
-//                 Grantee::get(),
-//                 CoinsLimit::get() + 1,
-//                 Vec::new(),
-//             ),
-//             Errors::TooManyCoinsToAllocate
-//         );
-//     })
-// }
+// Vulnerability Test: Allocations work even when system is paused
+#[test]
+fn allocations_bypass_pause_check() {
+    new_test_ext().execute_with(|| {
+        Allocations::initialize_members(&[Oracle::get()]);
+        
+        // Pause the system
+        assert_ok!(EmergencyShutdown::pause(RawOrigin::Root.into()));
+        assert_eq!(EmergencyShutdown::paused(), true);
+        
+        // Bug: Allocations pallet doesn't check if system is paused
+        // Even though it depends on pallet_pause::Config, it never checks the pause state
+        // This allows allocations to continue even when the system should be paused
+        assert_ok!(Allocations::allocate_coins(
+            Origin::signed(Oracle::get()),
+            Grantee::get(),
+            50,
+            Vec::new(),
+        ));
+        
+        // Allocation succeeded even though system is paused
+        assert_eq!(Allocations::allocated_coins(), 50);
+        assert_eq!(Balances::free_balance(Grantee::get()), 45);
+    })
+}
+

@@ -16,7 +16,7 @@ Halborn requests you to audit these smart contracts. Not only look at the code r
 # CTF List
 
 
-## Solidity CTF for Ethereum 
+## Solidity CTF for Ethereum ✅
 
 ./HalbornCTF_Solidity_Ethereum
 
@@ -36,6 +36,6 @@ Halborn requests you to audit these smart contracts. Not only look at the code r
 
 ./HalbornCTF_Rust_CosmWasm/
 
-## NEAR CTF Based on Rust
+## NEAR CTF Based on Rust ✅
 
 ./HalbornCTF_Rust_NEAR/
