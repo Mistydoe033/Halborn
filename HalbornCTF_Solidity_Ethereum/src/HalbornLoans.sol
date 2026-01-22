@@ -72,4 +72,13 @@ contract HalbornLoans is Initializable, UUPSUpgradeable, MulticallUpgradeable {
     }
 
     function _authorizeUpgrade(address) internal override {}
+
+    // BUG on ERC721Received was not implemented...
+    function onERC721Received(address , address , uint256 , bytes calldata )
+        external
+        pure
+        returns (bytes4)
+    {
+        return this.onERC721Received.selector;
+    }
 }
