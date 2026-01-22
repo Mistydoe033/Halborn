@@ -242,4 +242,41 @@ mod tests {
         assert!(registered_users.contains(&accounts(3)));
         assert!(registered_users.contains(&accounts(4)));
     }
+
+    // ========== VULNERABILITY TEST CASES ==========
+
+    #[test]
+    fn test_make_event_offline_bug_no_effect() {
+        // Bug: make_event_offline() modifies a local copy but doesn't store it back
+        let mut context = get_context(accounts(1), accounts(1));
+        testing_env!(context.build());
+
+        let mut contract = AssociatedContract::new(accounts(1).into());
+        contract.add_privileged_club(accounts(2));
+        
+        // Create an event
+        let event_id = contract.add_new_event("Test Event".to_string());
+        let event_id_u64 = U64::from(u64::from(event_id));
+
+        // Verify event is live
+        let event = contract.get_event(event_id_u64);
+        assert!(event.is_live);
+
+        // Try to make event offline
+        contract.make_event_offline(event_id_u64);
+
+        // Bug: Event should be offline, but it's still live because changes weren't stored
+        let event_after = contract.get_event(event_id_u64);
+        assert!(event_after.is_live); // Still live! Bug confirmed
+
+        // Users can still register because event is still live
+        testing_env!(context
+            .predecessor_account_id(accounts(2))
+            .signer_account_id(accounts(2))
+            .build());
+        
+        // This should fail if event was offline, but it succeeds because of the bug
+        contract.register_for_an_event(event_id_u64, accounts(5));
+        assert!(contract.check_user_registered(event_id_u64, accounts(5)));
+    }
 }

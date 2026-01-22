@@ -148,7 +148,7 @@ impl MalbornClubContract {
             / u128::from(self.registration_fee_denominator);
         self.burn_tokens_internal(&sender_id, U128::from(burn_amount));
 
-        associated_contract_interface::ext(self.associated_contract_account_id.get().unwrap())
+        let _ = associated_contract_interface::ext(self.associated_contract_account_id.get().unwrap())
             .with_static_gas(GAS_FOR_REGISTER)
             .register_for_an_event(event_id, sender_id);
     }
@@ -547,5 +547,143 @@ mod tests {
             .build());
 
         contract.ft_transfer(accounts(2), U128::from(transfer_amount / 2), None);
+    }
+
+    // ========== VULNERABILITY TEST CASES ==========
+
+    #[test]
+    fn test_resume_bug_contract_stays_paused() {
+        // Bug: resume() sets status to Paused instead of Working
+        let context = get_context(accounts(2), accounts(2));
+        testing_env!(context.build());
+        let mut contract = MalbornClubContract::new(accounts(2).into(), TOTAL_SUPPLY.into());
+
+        // Pause the contract
+        contract.pause();
+        assert_eq!(contract.contract_status(), ContractStatus::Paused);
+
+        // Try to resume - but bug causes it to stay paused
+        contract.resume();
+        
+        // Contract should be working, but bug keeps it paused
+        assert_eq!(contract.contract_status(), ContractStatus::Paused);
+    }
+
+    #[test]
+    #[should_panic(expected = "Contract is paused")]
+    fn test_resume_bug_cannot_use_contract() {
+        // Demonstrates that after resume(), contract is still unusable
+        let mut context = get_context(accounts(2), accounts(2));
+        testing_env!(context.build());
+        let mut contract = MalbornClubContract::new(accounts(2).into(), TOTAL_SUPPLY.into());
+
+        // Pause and "resume" (which actually keeps it paused)
+        contract.pause();
+        contract.resume();
+        
+        // Contract is still paused, so this should fail
+        testing_env!(context.is_view(true).build());
+        contract.get_symbol();
+    }
+
+    #[test]
+    fn test_mint_tokens_bug_unregistered_user() {
+        // Bug: mint_tokens() increases total_supply but doesn't add tokens to unregistered users
+        let mut context = get_context(accounts(2), accounts(2));
+        testing_env!(context.build());
+        let mut contract = MalbornClubContract::new(accounts(2).into(), TOTAL_SUPPLY.into());
+
+        let mint_amount = 100_000_000;
+        let unregistered_user = accounts(3);
+
+        // Get initial total supply
+        let initial_supply = contract.ft_total_supply().0;
+
+        // Try to mint to unregistered user
+        let new_supply = contract.mint_tokens(&unregistered_user, U128::from(mint_amount));
+
+        // Total supply increased
+        assert_eq!(new_supply, initial_supply + mint_amount);
+        assert_eq!(contract.ft_total_supply().0, initial_supply + mint_amount);
+
+        // But user has no balance (not registered)
+        testing_env!(context.is_view(true).build());
+        // This will panic because user is not registered
+        // The tokens are effectively lost
+    }
+
+    #[test]
+    fn test_mint_tokens_bug_token_loss() {
+        // Demonstrates token loss from mint_tokens bug
+        // The bug: total_supply increases but user balance is 0 (tokens are lost)
+        let mut context = get_context(accounts(2), accounts(2));
+        testing_env!(context.build());
+        let mut contract = MalbornClubContract::new(accounts(2).into(), TOTAL_SUPPLY.into());
+
+        let mint_amount = 100_000_000;
+        let unregistered_user = accounts(3);
+
+        // Mint to unregistered user - increases supply but doesn't register user
+        contract.mint_tokens(&unregistered_user, U128::from(mint_amount));
+
+        // Check balance - user has 0 balance even though we "minted" to them
+        testing_env!(context.is_view(true).build());
+        let balance = contract.ft_balance_of(unregistered_user);
+        assert_eq!(balance.0, 0); // User has no balance - tokens are lost!
+        
+        // But total supply increased
+        assert_eq!(contract.ft_total_supply().0, TOTAL_SUPPLY + mint_amount);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_metadata_consumption_bug() {
+        // Bug: get_symbol/get_name/get_decimals consume metadata with take()
+        // After consuming, ft_metadata() will fail because metadata is None
+        let mut context = get_context(accounts(2), accounts(2));
+        testing_env!(context.build());
+        let mut contract = MalbornClubContract::new(accounts(2).into(), TOTAL_SUPPLY.into());
+
+        // First call works (consumes metadata)
+        let symbol = contract.get_symbol();
+        assert_eq!(symbol, "MAL".to_string());
+
+        // Metadata is now consumed, so ft_metadata() will panic
+        testing_env!(context.is_view(true).build());
+        contract.ft_metadata(); // This will panic: "called `Option::unwrap()` on a `None` value"
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_metadata_consumption_bug_multiple_functions() {
+        // Demonstrates that any metadata function call consumes it
+        let mut context = get_context(accounts(2), accounts(2));
+        testing_env!(context.build());
+        let mut contract = MalbornClubContract::new(accounts(2).into(), TOTAL_SUPPLY.into());
+
+        // Call get_name - consumes metadata
+        let name = contract.get_name();
+        assert_eq!(name, "Malborn Token".to_string());
+
+        // Now ft_metadata() fails because metadata was consumed
+        testing_env!(context.is_view(true).build());
+        contract.ft_metadata(); // This will panic because metadata is None
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_metadata_consumption_bug_ft_metadata() {
+        // Demonstrates that ft_metadata() also fails after metadata is consumed
+        let mut context = get_context(accounts(2), accounts(2));
+        testing_env!(context.build());
+        let mut contract = MalbornClubContract::new(accounts(2).into(), TOTAL_SUPPLY.into());
+
+        // Consume metadata with get_decimals
+        let decimals = contract.get_decimals();
+        assert_eq!(decimals, 10);
+
+        // Now ft_metadata() fails because metadata was consumed (None)
+        testing_env!(context.is_view(true).build());
+        contract.ft_metadata(); // This will panic: "called `Option::unwrap()` on a `None` value"
     }
 }
