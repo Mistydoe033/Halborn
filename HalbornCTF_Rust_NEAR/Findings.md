@@ -1,97 +1,178 @@
-# Halborn CTF – Smart Contract Security Audit Summary
+# Audit Findings Report
 
-This document summarizes the vulnerabilities exploited through unit testing of the HalbornCTF NEAR contracts.
+## 1. Executive Summary
 
-## halborn-near-ctf (Main Contract)
+This report documents the security review of the Halborn NEAR CTF contracts. The assessment focused on state correctness, storage persistence, and economic integrity. Findings were validated against the embedded Rust unit tests.
 
-### Exploit 1: resume() Function Sets Incorrect Status
+**Total Findings:** 5 (4 Critical, 1 High)
 
-- **Test:** `test_resume_bug_contract_stays_paused`
-- **Issue:** The `resume()` function incorrectly sets the contract status to `Paused` instead of `Working`.
-- **Exploit:** After calling `pause()` and then `resume()`, the contract remains permanently paused because `resume()` sets the status to `Paused` rather than `Working`.
-- **Impact:** Contract becomes permanently unusable after resume() is called. All functions that check `not_paused()` will continue to fail, resulting in complete denial of service.
-- **Severity:** Critical
+## 2. Overview
 
-### Exploit 2: mint_tokens() Loses Tokens for Unregistered Users
+**Folder name:** HalbornCTF_Rust_NEAR
 
-- **Test:** `test_mint_tokens_bug_unregistered_user`, `test_mint_tokens_bug_token_loss`
-- **Issue:** The `mint_tokens()` function increases the total supply when minting to a user, but only adds tokens to the user's balance if the user is already registered in the accounts map.
-- **Exploit:** When minting tokens to an unregistered user, the total supply increases but no tokens are added to the user's balance. The tokens are effectively lost as the supply is inflated without corresponding user balances.
-- **Impact:** Permanent token loss when minting to unregistered users. Supply inflation without corresponding user balances creates accounting inconsistencies and economic attack vectors.
-- **Severity:** Critical
+**Date:** 2026
 
-### Exploit 3: Metadata Functions Consume Metadata
+**Auditor:** Seth Brockob
 
-- **Test:** `test_metadata_consumption_bug`, `test_metadata_consumption_bug_multiple_functions`, `test_metadata_consumption_bug_ft_metadata`
-- **Issue:** The `get_symbol()`, `get_name()`, and `get_decimals()` functions use `token_metadata.take()` which consumes the metadata from storage.
-- **Exploit:** After the first call to any of these functions, the metadata is removed from storage. Subsequent calls to these functions or `ft_metadata()` will fail because the metadata no longer exists.
-- **Impact:** Metadata becomes inaccessible after first call. External integrations querying metadata will fail, and the contract appears broken to users after metadata consumption.
-- **Severity:** High
+## 3. Scope
 
+**In-scope contracts:**
 
+- halborn-near-ctf/src/lib.rs
+- halborn-near-ctf-associated-contract/src/lib.rs
+- halborn-near-ctf-staking/src/lib.rs
 
-## halborn-near-ctf-associated-contract (Event Registration Contract)
+**Out of scope:**
 
-### Exploit 1: make_event_offline() Has No Effect
+- Deployment scripts
+- Build configuration files
+- Documentation files
 
-- **Test:** `test_make_event_offline_bug_no_effect`
-- **Issue:** The `make_event_offline()` function attempts to modify the `is_live` field of an event, but it modifies a local copy returned by `get()` rather than the stored value.
-- **Exploit:** The modified event is never stored back to the LookupMap, so the function has no effect. Events remain live even after being "taken offline", allowing users to continue registering for events that should be offline.
-- **Impact:** Events cannot be properly taken offline. Access control bypass allows users to register for "offline" events. Function appears to work but has no actual effect.
-- **Severity:** Critical
+## 4. Methodology
 
+- Manual review of contract logic
+- Review of embedded unit tests
+- Economic impact analysis for token supply and staking accounting
 
+## 5. Risk Rating
 
-## halborn-near-ctf-staking (Staking Contract)
+- **Critical:** Full loss of functionality, funds, or protocol correctness
+- **High:** Major impact with realistic exploitation paths
+- **Medium:** Material impact with limited practical exploitation
+- **Low:** Minor impact or highly constrained exploitation
+- **Informational:** Best practice issues without direct impact
 
-### Exploit 1: unstake() Logic Error and Accounting Inconsistency
+## 6. Findings Summary
 
-- **Test:** `test_unstake_bug_when_balance_reaches_zero`, `test_unstake_bug_logic_inconsistency`, `test_unstake_edge_case_saturating_sub`
-- **Issue:** The `unstake()` function has inconsistent refund logic and does not validate that the unstake amount is less than or equal to the user's balance.
-- **Exploit:** When unstaking brings the balance to zero, it refunds the old balance instead of the unstaked amount. When attempting to unstake more than the user's balance, `saturating_sub` causes `total_staked` to be reduced by the requested amount rather than the actual balance, creating accounting inconsistencies.
-- **Impact:** Accounting inconsistency in `total_staked` when unstaking more than balance. Logic error in refund amounts when balance reaches zero. Potential for incorrect accounting if other functions rely on `total_staked`.
-- **Severity:** Critical
+| ID | Title | Risk |
+| --- | --- | --- |
+| N-01 | resume() Sets Incorrect Status | Critical |
+| N-02 | mint_tokens() Loses Tokens for Unregistered Users | Critical |
+| N-03 | Metadata Functions Consume Metadata | High |
+| N-04 | make_event_offline() Has No Effect | Critical |
+| N-05 | unstake() Logic Error and Accounting Inconsistency | Critical |
 
+## 7. Detailed Findings
 
+### N-01 – resume() Sets Incorrect Status
 
-## Overall Observations
+**Risk:** Critical
 
-- State management errors are present across multiple contracts, particularly in functions that modify contract state.
-- Functions that modify storage must ensure changes are persisted back to storage rather than modifying local copies.
-- Token minting functions must register users before adding tokens to prevent permanent token loss.
-- Metadata access patterns should use read-only operations to prevent accidental consumption of stored data.
-- Unstaking and withdrawal functions must validate amounts and maintain consistent accounting across all state variables.
+**Description:**
 
+The resume() function sets the contract status to `Paused` instead of `Working`. The tests `test_resume_bug_contract_stays_paused()` and `test_resume_bug_cannot_use_contract()` confirm the contract remains unusable after calling resume().
 
+**Code Section:**
 
-## Test Coverage
+- halborn-near-ctf/src/lib.rs: `resume()`
+- Tests: `test_resume_bug_contract_stays_paused()`, `test_resume_bug_cannot_use_contract()`
 
-Five vulnerabilities were identified across the three contracts. Multiple test cases were created for several findings to demonstrate different attack vectors, edge cases, and impact scenarios. This comprehensive testing approach ensures each vulnerability is thoroughly validated and its full scope is understood.
+**Impact:**
 
-**All Test Cases:**
+Permanent denial of service. Once paused, the contract cannot be resumed, and all guarded functions remain unusable.
 
-Main Contract (halborn-near-ctf) - 13 tests total:
-- test_new (functional test)
-- test_mint (functional test)
-- test_transfer (functional test)
-- test_pause (functional test)
-- test_blocklist (functional test)
-- test_blocklist2 (functional test)
-- test_resume_bug_contract_stays_paused (vulnerability test)
-- test_resume_bug_cannot_use_contract (vulnerability test)
-- test_mint_tokens_bug_unregistered_user (vulnerability test)
-- test_mint_tokens_bug_token_loss (vulnerability test)
-- test_metadata_consumption_bug (vulnerability test)
-- test_metadata_consumption_bug_multiple_functions (vulnerability test)
-- test_metadata_consumption_bug_ft_metadata (vulnerability test)
+**Recommendation on Improvement:**
 
-Associated Contract (halborn-near-ctf-associated-contract):
-- test_make_event_offline_bug_no_effect
+Set the contract status to Working:
+```rust
+self.status = Status::Working;
+```
 
-Staking Contract (halborn-near-ctf-staking):
-- test_stake_and_unstake
-- test_unstake_bug_when_balance_reaches_zero
-- test_unstake_bug_logic_inconsistency
-- test_unstake_edge_case_saturating_sub
+### N-02 – mint_tokens() Loses Tokens for Unregistered Users
 
-**Status:** All issues demonstrated successfully via unit tests using Cargo. All tests passing.
+**Risk:** Critical
+
+**Description:**
+
+`mint_tokens()` increases `total_supply` even when the recipient is not registered. The tests `test_mint_tokens_bug_unregistered_user()` and `test_mint_tokens_bug_token_loss()` confirm supply inflation without a corresponding balance.
+
+**Code Section:**
+
+- halborn-near-ctf/src/lib.rs: `mint_tokens()`
+- Tests: `test_mint_tokens_bug_unregistered_user()`, `test_mint_tokens_bug_token_loss()`
+
+**Impact:**
+
+Permanent token loss and supply inflation without ownership. This creates economic inconsistencies and undermines token integrity.
+
+**Recommendation on Improvement:**
+
+Register users before crediting balances:
+```rust
+if !self.accounts.contains_key(&account_id) {
+    self.accounts.insert(&account_id, &0u128);
+}
+```
+
+### N-03 – Metadata Functions Consume Metadata
+
+**Risk:** High
+
+**Description:**
+
+`get_symbol()`, `get_name()`, and `get_decimals()` use `token_metadata.take()` which removes metadata from storage. The tests `test_metadata_consumption_bug()`, `test_metadata_consumption_bug_multiple_functions()`, and `test_metadata_consumption_bug_ft_metadata()` show metadata becomes unavailable after one call.
+
+**Code Section:**
+
+- halborn-near-ctf/src/lib.rs: `get_symbol()`, `get_name()`, `get_decimals()`
+- Tests: `test_metadata_consumption_bug()`, `test_metadata_consumption_bug_multiple_functions()`, `test_metadata_consumption_bug_ft_metadata()`
+
+**Impact:**
+
+Token metadata becomes permanently inaccessible, breaking standard NEAR token metadata interfaces and downstream integrations.
+
+**Recommendation on Improvement:**
+
+Use read-only access with `get()` instead of `take()`.
+
+### N-04 – make_event_offline() Has No Effect
+
+**Risk:** Critical
+
+**Description:**
+
+`make_event_offline()` modifies a local copy of the event and never persists it. The test `test_make_event_offline_bug_no_effect()` confirms the event remains live and registrations still succeed.
+
+**Code Section:**
+
+- halborn-near-ctf-associated-contract/src/lib.rs: `make_event_offline()`
+- Test: `test_make_event_offline_bug_no_effect()`
+
+**Impact:**
+
+Events cannot be taken offline. This bypasses intended access control and allows registrations during cancellations or shutdowns.
+
+**Recommendation on Improvement:**
+
+Persist the updated event back into storage:
+```rust
+let mut event = self.events.get(&event_id).unwrap();
+event.is_live = false;
+self.events.insert(&event_id, &event);
+```
+
+### N-05 – unstake() Logic Error and Accounting Inconsistency
+
+**Risk:** Critical
+
+**Description:**
+
+`unstake()` uses `saturating_sub` and refunds inconsistently. The tests `test_unstake_bug_when_balance_reaches_zero()`, `test_unstake_bug_logic_inconsistency()`, and `test_unstake_edge_case_saturating_sub()` show incorrect `total_staked` accounting.
+
+**Code Section:**
+
+- halborn-near-ctf-staking/src/lib.rs: `unstake()`
+- Tests: `test_unstake_bug_when_balance_reaches_zero()`, `test_unstake_bug_logic_inconsistency()`, `test_unstake_edge_case_saturating_sub()`
+
+**Impact:**
+
+Incorrect `total_staked` accounting and inconsistent refunds, undermining staking economics and protocol balance correctness.
+
+**Recommendation on Improvement:**
+
+Validate `amount <= balance` and update `total_staked` based on the actual unstaked amount.
+
+## 8. Conclusion
+
+The NEAR contracts contain critical state management flaws that lead to permanent pause states, token loss, and incorrect accounting. These issues compromise both functionality and economic correctness. Remediation should prioritize state correctness, storage persistence, and balance validation.
+

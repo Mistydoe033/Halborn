@@ -1,162 +1,372 @@
-# Halborn CTF – Smart Contract Security Audit Summary
+# Audit Findings Report
 
-This document summarizes the vulnerabilities exploited through unit testing of the HalbornCTF contracts.
+## 1. Executive Summary
 
-### Test Configuration - Version Alignment
+This report documents the security review of the Halborn Ethereum CTF contracts: `HalbornToken`, `HalbornLoans`, and `HalbornNFT`. The assessment focused on upgradeability, access control, token economics, and reentrancy risks. All findings were validated against the provided Foundry unit tests.
 
-The OpenZeppelin contracts versions were aligned to match the reference implementation:
-- `openzeppelin-contracts`: v5.0.0 (for ERC1967Utils support in tests)
-- `openzeppelin-contracts-upgradeable`: v4.9.5 (for compatibility with test contracts)
+**Total Findings:** 14 (13 Critical, 1 Low)
 
-This version combination ensures that all required libraries and interfaces are available.
+## 2. Overview
 
+**Folder name:** HalbornCTF_Solidity_Ethereum
 
+**Date:** 2026
 
-## HalbornToken.sol
+**Auditor:** Seth Brockob
 
-### Exploit 1: UUPS Upgrade Bypass
+## 3. Scope
 
-- **Test:** `test_vulnerableUUPSupgrade()`
-- **Issue:** `_authorizeUpgrade(address)` is empty.
-- **Exploit:** Any address can call `upgradeTo(...)` and take over the contract.
-- **Impact:** Full contract compromise.
-- **Severity:** Critical
+**In-scope contracts:**
 
-### Exploit 2: Loans Address Manipulation Attack
+- src/HalbornToken.sol
+- src/HalbornLoans.sol
+- src/HalbornNFT.sol
 
-- **Test:** `test_setLoansAddress()`
-- **Issue:** `setLoans(address)` lacks access control and can be called by any address after a malicious upgrade.
-- **Exploit:** A malicious implementation is upgraded in; attacker reinitializes and calls `setLoans()` to assign themselves as the loan authority.
-- **Impact:** Attacker gains permanent mint/burn privileges while locking out the original owner & can no longer change loans address.
-- **Severity:** Critical
+**In-scope tests:**
 
-### Exploit 3: Unrestricted Minting (`mintToken`)
+- test/HalbornToken.t.sol
+- test/HalbornLoans.t.sol
+- test/HalbornNFT.t.sol
 
-- **Test:** `test_unlimitedMint()`
-- **Issue:** The `mintToken(address, uint256)` function can be called by any address previously set via `setLoans()`, without validation.
-- **Exploit:** A malicious contract registers itself and mints tokens arbitrarily.
-- **Impact:** Infinite token supply, economic breakdown.
-- **Severity:** Critical
+**Out of scope:**
 
-### Exploit 4: Unrestricted Burning (`burnToken`)
+- Library dependencies (OpenZeppelin)
+- Build artifacts
+- Test utilities
 
-- **Test:** `test_unlimitedBurn()`
-- **Issue:** `burnToken` can be used to destroy tokens from any address.
-- **Exploit:** A fake loan contract burns a user's tokens without permission.
-- **Impact:** Token holder funds loss.
-- **Severity:** Critical
+## 4. Methodology
 
+- Manual review of in-scope contracts
+- Review of Foundry test suites
+- Analysis of upgradeability, access control, and economic risk exposure
 
+## 5. Risk Rating
 
-## HalbornLoans.sol
+- **Critical:** Full compromise, irreversible fund loss, or protocol takeover
+- **High:** Major security or economic impact with realistic exploitation paths
+- **Medium:** Material impact with limited practical exploitation
+- **Low:** Minor impact or highly constrained exploitation
+- **Informational:** Best practice issues without direct impact
 
-### Exploit 1: UUPS Upgrade Bypass
+## 6. Findings Summary
 
-- **Test:** `test_vulnerableUUPSupgrade()`
-- **Issue:** `_authorizeUpgrade(address)` is empty.
-- **Exploit:** Any address can call `upgradeTo(...)` and take over the contract.
-- **Impact:** Full contract compromise and loan logic hijacking.
-- **Severity:** Critical
+| ID | Title | Risk |
+| --- | --- | --- |
+| H-01 | HalbornToken: UUPS Upgrade Bypass | Critical |
+| H-02 | HalbornToken: Loans Address Manipulation | Critical |
+| H-03 | HalbornToken: Unrestricted Token Minting | Critical |
+| H-04 | HalbornToken: Unrestricted Token Burning | Critical |
+| H-05 | HalbornLoans: UUPS Upgrade Bypass | Critical |
+| H-06 | HalbornLoans: Infinite Token Minting via Malicious Loan Contract | Critical |
+| H-07 | HalbornLoans: Arbitrary Token Burning via Loan Contract | Critical |
+| H-08 | HalbornLoans: Reentrancy in Collateral Withdrawal | Critical |
+| H-09 | HalbornNFT: Merkle Root Manipulation | Critical |
+| H-10 | HalbornNFT: Unlimited Airdrop Minting | Critical |
+| H-11 | HalbornNFT: UUPS Upgrade Bypass | Critical |
+| H-12 | HalbornNFT: Price Manipulation After Upgrade | Critical |
+| H-13 | HalbornNFT: ETH Drainage via Malicious Upgrade | Critical |
+| H-14 | HalbornNFT: Unchecked idCounter Overflow | Low |
 
-### Exploit 2: Infinite Token Minting via Malicious Loan Contract
+## 7. Detailed Findings
 
-- **Test:** `test_vulnerableLoanContractReksTokenMint()`
-- **Issue:** Token contract trusts `loans` address for minting; no validation after upgrade.
-- **Exploit:** Attacker upgrades to a malicious contract and mints unlimited tokens via `token.mintToken(...)`.
-- **Impact:** Infinite token inflation, economic collapse.
-- **Severity:** Critical
+### H-01 – HalbornToken: UUPS Upgrade Bypass
 
-### Exploit 3: Arbitrary Token Burning via Loan Contract
+**Risk:** Critical
 
-- **Test:** `test_vulnerableLoanContractReksTokenBurn()`
-- **Issue:** Token contract allows `loans` address to burn tokens from any user.
-- **Exploit:** Malicious loan contract calls `token.burnToken(...)` on users like Alice.
-- **Impact:** Irreversible user fund destruction.
-- **Severity:** Critical
+**Description:**
 
-### Exploit 4: Reentrancy in NFT Collateral Withdrawal
+The token contract inherits from `UUPSUpgradeable`, but `_authorizeUpgrade()` is empty. Any address can upgrade the implementation and reinitialize ownership. The test `test_vulnerableUUPSupgrade()` shows an unauthorized user upgrading to a malicious implementation.
 
-- **Test:** `test_Reentrancy()`
-- **Issue:** `withdrawCollateral()` lacks reentrancy protection.
-- **Exploit:** Re-enter during `onERC721Received` callback to withdraw multiple NFTs and call `getLoan(...)` before state updates.
-- **Impact:** Double NFT withdrawal and max loan drain.
-- **Severity:** Critical
+**Code Section:**
 
-### Exploit 5: Insecure Loan Collateralization
+- src/HalbornToken.sol: `_authorizeUpgrade(address)`
+- Test: `test_vulnerableUUPSupgrade()` in test/HalbornToken.t.sol
 
-- **Test:** Implicit in `test_Reentrancy()`, confirmed in reentrant logic
-- **Issue:** Loan amount is based on collateral count without lock mechanism or atomicity.
-- **Exploit:** Reentrancy alters collateral count mid-calculation, inflating borrowable tokens.
-- **Impact:** Collateral fraud, overdrawing loans.
-- **Severity:** Medium
+**Impact:**
 
+Complete contract takeover. Attackers gain control of minting, burning, and ownership logic, which directly destroys token integrity and value.
 
+**Recommendation on Improvement:**
 
-## HalbornNFT.sol
+Implement access control on upgrades:
+```solidity
+function _authorizeUpgrade(address) internal override onlyOwner {}
+```
 
-### Exploit 1: Merkle Root Manipulation
+### H-02 – HalbornToken: Loans Address Manipulation
 
-- **Test:** `test_setMerkelRoot()`
-- **Issue:** `setMerkleRoot()` has no access control.
-- **Exploit:** Any address can replace the Merkle root, bypassing the whitelist mechanism entirely.
-- **Impact:** Whitelist bypass, unauthorized users gain airdrop minting access.
-- **Severity:** Critical
+**Risk:** Critical
 
-### Exploit 2: Unlimited Airdrop Minting
+**Description:**
 
-- **Test:** `test_setMintUnlimited()`
-- **Issue:** Once the Merkle root is manipulated, crafted proofs can be used repeatedly.
-- **Exploit:** Attacker mints unlimited NFTs using a custom Merkle tree and valid proofs.
-- **Impact:** NFT supply inflation, ecosystem collapse.
-- **Severity:** Critical
+After a malicious upgrade, an attacker can call `setLoans()` and permanently assign themselves as the loans authority. The test `test_setLoansAddress()` shows that the original owner can no longer change the loans address.
 
-### Exploit 3: UUPS Upgrade Bypass
+**Code Section:**
 
-- **Test:** `test_vulnerableUUPSupgrade()`
-- **Issue:** `_authorizeUpgrade()` is left empty, allowing anyone to upgrade the contract.
-- **Exploit:** Attacker upgrades to a malicious implementation, reinitializes, and gains control.
-- **Impact:** Full protocol takeover — including minting logic, pricing, and ETH withdrawal.
-- **Severity:** Critical
+- src/HalbornToken.sol: `setLoans(address)`
+- Test: `test_setLoansAddress()` in test/HalbornToken.t.sol
 
-### Exploit 4: Price Manipulation
+**Impact:**
 
-- **Test:** `test_setPrice()`
-- **Issue:** NFT price is settable via `initialize()` after malicious upgrade.
-- **Exploit:** Attacker sets custom NFT price via reinitialization.
-- **Impact:** Undermines fair pricing model, opens door to abuse or griefing.
-- **Severity:** Critical
+Permanent mint/burn backdoor. The attacker can mint or burn arbitrarily, permanently compromising token economics.
 
-### Exploit 5: ETH Drainage via Malicious Upgrade
+**Recommendation on Improvement:**
 
-- **Test:** `test_stealETH()`
-- **Issue:** ETH stored in contract can be drained post-upgrade through a malicious `withdrawETH()` function.
-- **Exploit:** Attacker upgrades to a version with `withdrawETH()` and drains the full contract balance.
-- **Impact:** Complete ETH theft, user losses, contract bankruptcy.
-- **Severity:** Critical
+Add governance controls (timelock or multi-sig) around `setLoans()` and prevent reinitialization after upgrade.
 
+### H-03 – HalbornToken: Unrestricted Token Minting
 
+**Risk:** Critical
 
-## Code Fixes Applied
+**Description:**
 
-During the audit process, several critical bugs were identified and fixed to ensure the test suite runs correctly:
+`mintToken()` trusts the loans address without further validation. In `test_unlimitedMint()`, the attacker upgrades the contract, sets themselves as loans, and mints `type(uint256).max`.
 
-### HalbornNFT.sol - Fixed Inverted Logic in mintAirdrops
+**Code Section:**
 
-The `mintAirdrops` function had inverted logic in the token existence check. The original code used `require(_exists(id), "Token already minted")` which would only allow minting if the token already existed, preventing any new mints. This was corrected to `require(!_exists(id), "Token already minted")` to properly check that the token does not exist before minting.
+- src/HalbornToken.sol: `mintToken(address,uint256)`
+- Test: `test_unlimitedMint()` in test/HalbornToken.t.sol
 
-### HalbornLoans.sol - Added Missing ERC721 Receiver Implementation
+**Impact:**
 
-The `HalbornLoans` contract was missing the `onERC721Received` function, which is required for contracts that receive NFTs via `safeTransferFrom`. Without this implementation, the `depositNFTCollateral` function would fail when attempting to transfer NFTs to the contract. The function was added to match the reference implementation, allowing the contract to properly receive NFTs during collateral deposits.
+Infinite token inflation and total loss of economic integrity.
 
+**Recommendation on Improvement:**
 
-## Overall Observations
+Enforce hard supply caps and validate minting logic beyond a single trusted address.
 
-- UUPS vulnerabilities affect every contract.
-- Token mint/burn control must not be externally assigned without proper validation.
-- Reentrancy and withdrawal logic should follow best practices.
-- Whitelist minting must include per-address + per-ID limitations.
-- Contracts receiving NFTs must implement the ERC721Receiver interface.
+### H-04 – HalbornToken: Unrestricted Token Burning
 
+**Risk:** Critical
 
+**Description:**
 
-**Status:** All issues demonstrated successfully via unit tests using Foundry. All tests passing.
+`burnToken()` allows burning from any address by the loans authority. In `test_unlimitedBurn()`, the attacker upgrades and burns a victim’s balance.
+
+**Code Section:**
+
+- src/HalbornToken.sol: `burnToken(address,uint256)`
+- Test: `test_unlimitedBurn()` in test/HalbornToken.t.sol
+
+**Impact:**
+
+Direct, irreversible user fund loss.
+
+**Recommendation on Improvement:**
+
+Restrict burns to validated loan-default scenarios with explicit authorization and logging.
+
+### H-05 – HalbornLoans: UUPS Upgrade Bypass
+
+**Risk:** Critical
+
+**Description:**
+
+The loans contract also leaves `_authorizeUpgrade()` empty. In `test_vulnerableUUPSupgrade()`, an unauthorized user upgrades and reinitializes the loans contract.
+
+**Code Section:**
+
+- src/HalbornLoans.sol: `_authorizeUpgrade(address)`
+- Test: `test_vulnerableUUPSupgrade()` in test/HalbornLoans.t.sol
+
+**Impact:**
+
+Full takeover of the lending system, enabling arbitrary changes to collateral and mint/burn logic.
+
+**Recommendation on Improvement:**
+
+Add access control to upgrade logic and enforce upgrade governance.
+
+### H-06 – HalbornLoans: Infinite Token Minting via Malicious Loan Contract
+
+**Risk:** Critical
+
+**Description:**
+
+After upgrading to a malicious loans implementation, the attacker uses the trusted mint path to create infinite supply. `test_vulnerableLoanContractReksTokenMint()` shows the attacker minting `type(uint256).max`.
+
+**Code Section:**
+
+- src/HalbornLoans.sol: `getLoan(uint256)` mint path
+- Test: `test_vulnerableLoanContractReksTokenMint()` in test/HalbornLoans.t.sol
+
+**Impact:**
+
+Unbounded inflation and collapse of token economics.
+
+**Recommendation on Improvement:**
+
+Cap minting per loan, validate collateralization, and limit trusted mint authority.
+
+### H-07 – HalbornLoans: Arbitrary Token Burning via Loan Contract
+
+**Risk:** Critical
+
+**Description:**
+
+The malicious loans upgrade burns arbitrary user balances. `test_vulnerableLoanContractReksTokenBurn()` demonstrates burning a victim’s balance through the trusted loans relationship.
+
+**Code Section:**
+
+- src/HalbornLoans.sol: `returnLoan(uint256)` burn path
+- Test: `test_vulnerableLoanContractReksTokenBurn()` in test/HalbornLoans.t.sol
+
+**Impact:**
+
+Targeted or systemic destruction of user balances.
+
+**Recommendation on Improvement:**
+
+Validate burn operations against loan state and borrower authorization before execution.
+
+### H-08 – HalbornLoans: Reentrancy in Collateral Withdrawal
+
+**Risk:** Critical
+
+**Description:**
+
+`withdrawCollateral()` transfers NFTs before updating state, enabling reentrancy via `onERC721Received`. In `test_Reentrancy()`, the attacker withdraws multiple NFTs and drains max tokens via `getLoan()`.
+
+**Code Section:**
+
+- src/HalbornLoans.sol: `withdrawCollateral(uint256)`
+- Test: `test_Reentrancy()` in test/HalbornLoans.t.sol
+
+**Impact:**
+
+Double collateral withdrawal and maximum token drain, causing severe protocol loss.
+
+**Recommendation on Improvement:**
+
+Apply reentrancy guards and move state updates before external calls (checks-effects-interactions).
+
+### H-09 – HalbornNFT: Merkle Root Manipulation
+
+**Risk:** Critical
+
+**Description:**
+
+`setMerkleRoot()` has no access control. `test_setMerkelRoot()` shows an unauthorized user replacing the whitelist root.
+
+**Code Section:**
+
+- src/HalbornNFT.sol: `setMerkleRoot(bytes32)`
+- Test: `test_setMerkelRoot()` in test/HalbornNFT.t.sol
+
+**Impact:**
+
+Whitelist bypass, enabling unauthorized NFT minting and economic dilution.
+
+**Recommendation on Improvement:**
+
+Restrict `setMerkleRoot()` to authorized admins (onlyOwner or governance).
+
+### H-10 – HalbornNFT: Unlimited Airdrop Minting
+
+**Risk:** Critical
+
+**Description:**
+
+After root manipulation, crafted proofs allow unlimited mints. `test_setMintUnlimited()` demonstrates minting multiple IDs using attacker-controlled proofs.
+
+**Code Section:**
+
+- src/HalbornNFT.sol: `mintAirdrops(uint256,bytes32[])`
+- Test: `test_setMintUnlimited()` in test/HalbornNFT.t.sol
+
+**Impact:**
+
+NFT supply inflation and collapse of scarcity.
+
+**Recommendation on Improvement:**
+
+Track claimed IDs and per-address mint limits to enforce one-time claims.
+
+### H-11 – HalbornNFT: UUPS Upgrade Bypass
+
+**Risk:** Critical
+
+**Description:**
+
+The NFT contract exposes the same empty `_authorizeUpgrade()`. `test_vulnerableUUPSupgrade()` shows unauthorized upgrades and reinitialization.
+
+**Code Section:**
+
+- src/HalbornNFT.sol: `_authorizeUpgrade(address)`
+- Test: `test_vulnerableUUPSupgrade()` in test/HalbornNFT.t.sol
+
+**Impact:**
+
+Complete NFT contract takeover, enabling arbitrary minting, pricing changes, and ETH theft.
+
+**Recommendation on Improvement:**
+
+Restrict upgrades with access control and governance approvals.
+
+### H-12 – HalbornNFT: Price Manipulation After Upgrade
+
+**Risk:** Critical
+
+**Description:**
+
+After a malicious upgrade, the attacker reinitializes the contract and sets arbitrary pricing. `test_setPrice()` confirms price manipulation.
+
+**Code Section:**
+
+- src/HalbornNFT.sol: `initialize(bytes32,uint256)`
+- Test: `test_setPrice()` in test/HalbornNFT.t.sol
+
+**Impact:**
+
+Economic manipulation of mint pricing, enabling free mints or denial of service.
+
+**Recommendation on Improvement:**
+
+Prevent reinitialization after deployment and separate price updates into restricted admin functions.
+
+### H-13 – HalbornNFT: ETH Drainage via Malicious Upgrade
+
+**Risk:** Critical
+
+**Description:**
+
+In `test_stealETH()`, the attacker upgrades to a malicious implementation and drains all ETH from the contract via a modified `withdrawETH()`.
+
+**Code Section:**
+
+- src/HalbornNFT.sol: `withdrawETH(uint256)`
+- Test: `test_stealETH()` in test/HalbornNFT.t.sol
+
+**Impact:**
+
+Total loss of ETH held in the contract, causing direct user losses.
+
+**Recommendation on Improvement:**
+
+Protect upgrades and withdrawals with multi-sig or timelock governance.
+
+### H-14 – HalbornNFT: Unchecked idCounter Overflow
+
+**Risk:** Low
+
+**Description:**
+
+`idCounter` is incremented in an unchecked block. The test `test_overflowCounter()` highlights this as theoretically overflowable but practically infeasible.
+
+**Code Section:**
+
+- src/HalbornNFT.sol: `mintBuyWithETH()` unchecked increment
+- Test: `test_overflowCounter()` in test/HalbornNFT.t.sol
+
+**Impact:**
+
+Theoretical token ID reuse if overflow occurs. Practical exploitation is infeasible but it remains a correctness issue.
+
+**Recommendation on Improvement:**
+
+Use checked arithmetic or enforce a maximum supply cap.
+
+## 8. Conclusion
+
+All contracts exhibit systemic upgradeability weaknesses that allow complete takeovers, unlimited minting, and ETH theft. These issues introduce severe economic risk to token and NFT holders. Upgrade authorization and access control must be remediated before any production deployment.
+
