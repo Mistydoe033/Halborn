@@ -24,7 +24,7 @@ Halborn requests you to audit these smart contracts. Not only look at the code r
 
 ./HalbornCTF_Rust_Solana/
 
-## Substrate CTF Based on Rust
+## Substrate CTF Based on Rust ✅
 
 ./HalbornCTF_Rust_Substrate/
 
