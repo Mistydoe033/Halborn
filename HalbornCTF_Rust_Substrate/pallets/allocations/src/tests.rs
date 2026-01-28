@@ -184,7 +184,7 @@ fn allocate_the_right_amount_of_coins_to_everyone() {
 fn allocations_bypass_pause_check() {
     new_test_ext().execute_with(|| {
         Allocations::initialize_members(&[Oracle::get()]);
-        
+
         // Pause the system
         assert_ok!(EmergencyShutdown::pause(RawOrigin::Root.into()));
         assert_eq!(EmergencyShutdown::paused(), true);

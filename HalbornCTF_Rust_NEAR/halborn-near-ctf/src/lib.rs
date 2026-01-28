@@ -606,10 +606,10 @@ mod tests {
         assert_eq!(new_supply, initial_supply + mint_amount);
         assert_eq!(contract.ft_total_supply().0, initial_supply + mint_amount);
 
-        // But user has no balance (not registered)
+        // But user has no balance (not registered) - tokens are lost
         testing_env!(context.is_view(true).build());
-        // This will panic because user is not registered
-        // The tokens are effectively lost
+        let balance = contract.ft_balance_of(unregistered_user);
+        assert_eq!(balance.0, 0); // User has no balance - tokens are effectively lost!
     }
 
     #[test]
@@ -685,5 +685,172 @@ mod tests {
         // Now ft_metadata() fails because metadata was consumed (None)
         testing_env!(context.is_view(true).build());
         contract.ft_metadata(); // This will panic: "called `Option::unwrap()` on a `None` value"
+    }
+
+    #[test]
+    #[should_panic(expected = "attempt to divide by zero")]
+    fn test_registration_fee_denominator_zero_division() {
+        // Bug: Owner can set registration_fee_denominator to 0, causing division by zero
+        let context = get_context(accounts(2), accounts(2));
+        testing_env!(context.build());
+        let mut contract = MalbornClubContract::new(accounts(2).into(), TOTAL_SUPPLY.into());
+
+        // Set associated contract
+        contract.set_associated_contract(accounts(3));
+
+        // Owner sets denominator to 0
+        contract.set_registration_fee_denominator(U128::from(0));
+
+        // Register for event - this will panic due to division by zero
+        contract.register_for_event(U128::from(1));
+    }
+
+    #[test]
+    fn test_register_for_event_burns_tokens_before_external_call() {
+        // Bug: Tokens are burned BEFORE external call. If external call fails, tokens are lost
+        // This is a critical issue - users lose tokens without getting registered
+        // The issue: burn_tokens_internal() is called BEFORE the external promise
+        // If the promise fails (event doesn't exist, event offline, etc.), tokens are still burned
+        let mut context = get_context(accounts(2), accounts(2));
+        testing_env!(context.build());
+        let mut contract = MalbornClubContract::new(accounts(2).into(), TOTAL_SUPPLY.into());
+
+        // Register user and give them tokens
+        testing_env!(context
+            .storage_usage(env::storage_usage())
+            .attached_deposit(contract.storage_balance_bounds().min.into())
+            .predecessor_account_id(accounts(2))
+            .build());
+        contract.storage_deposit(None, None);
+        
+        // Give user some tokens
+        testing_env!(context
+            .predecessor_account_id(accounts(2))
+            .signer_account_id(accounts(2))
+            .build());
+        contract.mint_tokens(&accounts(2), U128::from(1_000_000_000));
+        
+        // Check balances before (ft_balance_of calls not_paused which needs signer_account_id)
+        let balance_before = contract.ft_balance_of(accounts(2)).0;
+        let supply_before = contract.ft_total_supply().0;
+
+        // Set associated contract to an address that exists but isn't set up properly
+        // This simulates a scenario where the external call will fail
+        // (e.g., event doesn't exist, contract not in privileged_clubs, etc.)
+        contract.set_associated_contract(accounts(3));
+
+        // Calculate burn amount
+        let burn_amount = supply_before / 10000; // Default denominator is 10000
+
+        // Try to register for a non-existent event
+        // Tokens will be burned BEFORE the external call
+        // External call will fail (event doesn't exist), but tokens are already burned
+        // Note: register_for_event() will fail when calling the external contract,
+        // but tokens are already burned at this point
+        contract.register_for_event(U128::from(999)); // Non-existent event
+
+        // Verify tokens were burned (check balances after)
+        let balance_after = contract.ft_balance_of(accounts(2)).0;
+        let supply_after = contract.ft_total_supply().0;
+        
+        // Tokens were burned even though registration will fail
+        // This demonstrates the bug: tokens burned without successful registration
+        assert_eq!(balance_after, balance_before - burn_amount);
+        assert_eq!(supply_after, supply_before - burn_amount);
+    }
+
+    #[test]
+    #[should_panic(expected = "Contract is paused")]
+    fn test_ft_total_supply_breaks_when_paused() {
+        // Bug: ft_total_supply() calls not_paused(), breaking FT standard
+        let mut context = get_context(accounts(2), accounts(2));
+        testing_env!(context.build());
+        let mut contract = MalbornClubContract::new(accounts(2).into(), TOTAL_SUPPLY.into());
+
+        // Pause the contract
+        contract.pause();
+
+        // FT standard view function should work, but it fails when paused
+        testing_env!(context.is_view(true).build());
+        contract.ft_total_supply(); // This will panic: "Contract is paused"
+    }
+
+    #[test]
+    #[should_panic(expected = "Contract is paused")]
+    fn test_ft_balance_of_breaks_when_paused() {
+        // Bug: ft_balance_of() calls not_paused(), breaking FT standard
+        let mut context = get_context(accounts(2), accounts(2));
+        testing_env!(context.build());
+        let mut contract = MalbornClubContract::new(accounts(2).into(), TOTAL_SUPPLY.into());
+
+        // Pause the contract
+        contract.pause();
+
+        // FT standard view function should work, but it fails when paused
+        testing_env!(context.is_view(true).build());
+        contract.ft_balance_of(accounts(2)); // This will panic: "Contract is paused"
+    }
+
+    #[test]
+    #[should_panic(expected = "Contract is paused")]
+    fn test_get_blocklist_status_breaks_when_paused() {
+        // Bug: get_blocklist_status() calls not_paused(), causing DoS
+        let mut context = get_context(accounts(2), accounts(2));
+        testing_env!(context.build());
+        let mut contract = MalbornClubContract::new(accounts(2).into(), TOTAL_SUPPLY.into());
+
+        // Pause the contract
+        contract.pause();
+
+        // View function should work, but it fails when paused
+        testing_env!(context.is_view(true).build());
+        contract.get_blocklist_status(&accounts(1)); // This will panic: "Contract is paused"
+    }
+
+    #[test]
+    fn test_set_associated_contract_no_validation() {
+        // Bug: set_associated_contract() doesn't validate account ID
+        // Can set to self, invalid account, or create circular dependencies
+        let mut context = get_context(accounts(2), accounts(2));
+        testing_env!(context.build());
+        let mut contract = MalbornClubContract::new(accounts(2).into(), TOTAL_SUPPLY.into());
+        
+        // BUG: Can set associated contract to self - creates circular dependency
+        // Should validate that account_id != current_account_id, but doesn't
+        let current_account = env::current_account_id();
+        contract.set_associated_contract(current_account.clone());
+        
+        // Verify it was set (even though it's invalid)
+        testing_env!(context.is_view(true).build());
+        let associated = contract.associated_contract_account_id.get();
+        assert_eq!(associated, Some(current_account));
+        
+        // This creates a circular dependency where the contract references itself
+        // If register_for_event() is called, it will try to call itself, causing issues
+    }
+
+    #[test]
+    fn test_set_associated_contract_invalid_account() {
+        // Bug: set_associated_contract() doesn't validate that account exists or is valid
+        // Can set to any account ID without validation
+        let mut context = get_context(accounts(2), accounts(2));
+        testing_env!(context.build());
+        let mut contract = MalbornClubContract::new(accounts(2).into(), TOTAL_SUPPLY.into());
+        
+        // Set to a non-existent or invalid account
+        // Should validate account exists, but doesn't
+        // Use a string-based AccountId to represent a non-existent account
+        let invalid_account: AccountId = "nonexistent-contract.near".parse().unwrap();
+        let invalid_account_clone = invalid_account.clone();
+        contract.set_associated_contract(invalid_account);
+        
+        // Verify it was set (even though account may not exist)
+        testing_env!(context.is_view(true).build());
+        let associated = contract.associated_contract_account_id.get();
+        assert_eq!(associated, Some(invalid_account_clone));
+        
+        // If register_for_event() is called, it will try to call a non-existent contract
+        // This will cause promise failures and token loss (tokens burned before external call)
+        // This demonstrates the lack of account validation
     }
 }

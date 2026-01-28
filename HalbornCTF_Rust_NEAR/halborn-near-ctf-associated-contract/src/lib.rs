@@ -279,4 +279,129 @@ mod tests {
         contract.register_for_an_event(event_id_u64, accounts(5));
         assert!(contract.check_user_registered(event_id_u64, accounts(5)));
     }
+
+    #[test]
+    #[should_panic(expected = "called `Option::unwrap()` on a `None` value")]
+    fn test_check_user_registered_panic_on_missing_registered_users() {
+        // Bug: check_user_registered() uses unwrap() which can panic
+        // If event_to_registered_users is missing (storage corruption), this panics
+        let context = get_context(accounts(1), accounts(1));
+        testing_env!(context.build());
+
+        let mut contract = AssociatedContract::new(accounts(1).into());
+        
+        // Create an event
+        let event_id = contract.add_new_event("Test Event".to_string());
+        let event_id_u64 = U64::from(u64::from(event_id));
+
+        // Manually remove event_to_registered_users (simulating storage corruption)
+        // In practice, this shouldn't happen, but if it does, check_user_registered() will panic
+        contract.event_to_registered_users.remove(&event_id_u64);
+
+        // Now check_user_registered() will panic because event_to_registered_users is missing
+        // even though event exists
+        contract.check_user_registered(event_id_u64, accounts(5));
+    }
+
+    #[test]
+    #[should_panic(expected = "called `Option::unwrap()` on a `None` value")]
+    fn test_register_for_an_event_panic_on_missing_registered_users() {
+        // Bug: register_for_an_event() uses unwrap() which can panic
+        // If event_to_registered_users is missing (storage corruption), this panics
+        let mut context = get_context(accounts(1), accounts(1));
+        testing_env!(context.build());
+
+        let mut contract = AssociatedContract::new(accounts(1).into());
+        contract.add_privileged_club(accounts(2));
+        
+        // Create an event
+        let event_id = contract.add_new_event("Test Event".to_string());
+        let event_id_u64 = U64::from(u64::from(event_id));
+
+        // Manually remove event_to_registered_users (simulating storage corruption)
+        contract.event_to_registered_users.remove(&event_id_u64);
+
+        // Now register_for_an_event() will panic because event_to_registered_users is missing
+        testing_env!(context
+            .predecessor_account_id(accounts(2))
+            .signer_account_id(accounts(2))
+            .build());
+        contract.register_for_an_event(event_id_u64, accounts(5));
+    }
+
+    #[test]
+    #[should_panic(expected = "called `Option::unwrap()` on a `None` value")]
+    fn test_get_event_panic_on_nonexistent_event() {
+        // Bug: get_event() uses unwrap() instead of returning Option
+        // If event doesn't exist, view function panics
+        let context = get_context(accounts(1), accounts(1));
+        testing_env!(context.build());
+
+        let contract = AssociatedContract::new(accounts(1).into());
+        
+        // Try to get non-existent event - should return Option but panics instead
+        contract.get_event(U64::from(999)); // This will panic
+    }
+
+    #[test]
+    fn test_remove_event_storage_leak() {
+        // Bug: remove_event() removes entries from LookupMaps but doesn't clear
+        // the underlying LookupSet storage, causing storage leaks
+        let mut context = get_context(accounts(1), accounts(1));
+        testing_env!(context.build());
+
+        let mut contract = AssociatedContract::new(accounts(1).into());
+        contract.add_privileged_club(accounts(2));
+        
+        // Create an event
+        let event_id = contract.add_new_event("Test Event".to_string());
+        let event_id_u64 = U64::from(u64::from(event_id));
+        
+        // Register multiple users for the event
+        testing_env!(context
+            .predecessor_account_id(accounts(2))
+            .signer_account_id(accounts(2))
+            .build());
+        contract.register_for_an_event(event_id_u64, accounts(3));
+        contract.register_for_an_event(event_id_u64, accounts(4));
+        contract.register_for_an_event(event_id_u64, accounts(5));
+        
+        // Verify users are registered
+        assert!(contract.check_user_registered(event_id_u64, accounts(3)));
+        assert!(contract.check_user_registered(event_id_u64, accounts(4)));
+        assert!(contract.check_user_registered(event_id_u64, accounts(5)));
+        
+        // Verify event exists
+        let event = contract.get_event(event_id_u64);
+        assert!(event.is_live);
+        
+        // Remove the event
+        testing_env!(context
+            .predecessor_account_id(accounts(1))
+            .signer_account_id(accounts(1))
+            .build());
+        contract.remove_event(event_id_u64);
+        
+        // Verify event is removed from LookupMap
+        // This should panic because event no longer exists
+        testing_env!(context.is_view(true).build());
+        let event_exists = contract.events.contains_key(&event_id_u64);
+        assert!(!event_exists);
+        
+        // Verify event_to_registered_users entry is removed from LookupMap
+        let registered_users_exists = contract.event_to_registered_users.contains_key(&event_id_u64);
+        assert!(!registered_users_exists);
+        
+        // BUG: The underlying LookupSet storage with key StorageKey::RegisteredUsers(event_id)
+        // still persists in storage even though the entry was removed from the LookupMap.
+        // This causes a storage leak because:
+        // 1. The LookupSet was created with its own storage key: StorageKey::RegisteredUsers(event_id)
+        // 2. remove_event() only removes the entry from event_to_registered_users LookupMap
+        // 3. The LookupSet storage itself is never cleared, preventing storage refunds
+        // 4. Over time, this causes storage to grow indefinitely
+        
+        // Note: We cannot directly test storage persistence in unit tests without
+        // accessing low-level storage, but the bug is that remove_event() doesn't
+        // iterate through and clear the LookupSet before removing it from the LookupMap
+    }
 }
